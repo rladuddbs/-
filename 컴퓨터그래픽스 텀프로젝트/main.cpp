@@ -1,26 +1,36 @@
 #include "CHeader.h"
+#include "initialSet.h"
 #include "CObj.h"
 #include "MatrixFunc.h"
 
-void make_vertexShaders();
-void make_fragmentShaders();
-GLvoid make_shaderProgram();
+
 GLvoid drawScene();
-GLvoid Reshape(int w, int h);
-char* filetobuf(const char* file);
 void Timer(int value);
 GLvoid Keyboard(unsigned char key, int x, int y);
+void GetMouseDir();
+void processMouse(int button, int state, int x, int y);
+void processDragMouse(int x, int y);
+
+bool SphereRayIntersection(const glm::vec3& sphereCenter, float sphereRadius, const glm::vec3& rayStart, const glm::vec3& rayDirection);
+
 
 GLint width, height;
-GLuint shaderProgramID;
-GLuint vertexShader;
-GLuint fragmentShader;
-GLchar* vertexSource, * fragmentSource;
-
-GLint result;
-GLchar errorLog[512];
 
 CObj a;
+double mx, my;
+
+glm::mat4 ModelMatrix(1.0f);
+
+glm::vec3 cameraPos = glm::vec3(0.0, 0.0, 20.0); //--- 카메라 위치
+glm::vec3 cameraDirection = glm::vec3(0.0f, 0.0f, 0.0f); //--- 카메라 바라보는 방향
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f); //--- 카메라 위쪽 방향
+glm::mat4 view = glm::mat4(1.0f);
+
+glm::mat4 projection = glm::mat4(1.0f);
+
+bool selected;
+
+glm::vec3 objPos = glm::vec3(2.0, 0.0, 0.0);
 
 void main(int argc, char** argv) //--- 윈도우 출력하고 콜백함수 설정
 {
@@ -49,7 +59,8 @@ void main(int argc, char** argv) //--- 윈도우 출력하고 콜백함수 설정
 	make_fragmentShaders();
 	make_shaderProgram();
 	glutKeyboardFunc(Keyboard); 
-
+	glutMouseFunc(processMouse);
+	glutMotionFunc(processDragMouse);
 	glutTimerFunc(10, Timer, 1);
 	glutDisplayFunc(drawScene); 
 	glutReshapeFunc(Reshape);
@@ -62,19 +73,7 @@ GLvoid drawScene()
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(shaderProgramID);
 
-	glm::mat4 ModelMatrix(1.0f);
-
-	glm::vec3 cameraPos = glm::vec3(0.0, 0.0, 20.0); //--- 카메라 위치
-
-	glm::vec3 cameraDirection = glm::vec3(0.0f, 1.0f, 0.0f); //--- 카메라 바라보는 방향
-
-	glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f); //--- 카메라 위쪽 방향
-
-	glm::mat4 view = glm::mat4(1.0f);
-
 	view = glm::lookAt(cameraPos, cameraDirection, cameraUp);
-
-	glm::mat4 projection = glm::mat4(1.0f);
 
 	projection = glm::perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
 
@@ -116,70 +115,20 @@ GLvoid drawScene()
 		lightColorLocation, 1, glm::value_ptr(glm::vec3(1.0, 1.0, 1.0))
 	);
 
+	My_rotate(shaderProgramID, ModelMatrix, glm::vec3(0.0, 1.0, 0.0), 90.f);
 
-	a.render();
+	My_translate(shaderProgramID, ModelMatrix, objPos);
+
+	GLUquadric* planet_obj = gluNewQuadric();
+	gluQuadricDrawStyle(planet_obj, GLU_FILL);
+	gluQuadricNormals(planet_obj, GLU_SMOOTH);
+	gluQuadricOrientation(planet_obj, GLU_OUTSIDE);
+	gluSphere(planet_obj, 1.0, 50, 50);
+
 
 	glutSwapBuffers(); //--- 화면에 출력하기
 }
 
-//--- 다시그리기 콜백 함수
-GLvoid Reshape(int w, int h) //--- 콜백 함수: 다시 그리기 콜백 함수
-{
-	glViewport(0, 0, w, h);
-}
-GLvoid make_shaderProgram()
-{
-	make_vertexShaders(); //--- 버텍스 세이더 만들기
-	make_fragmentShaders(); //--- 프래그먼트 세이더 만들기
-	shaderProgramID = glCreateProgram();
-	glAttachShader(shaderProgramID, vertexShader);
-	glAttachShader(shaderProgramID, fragmentShader);
-	glLinkProgram(shaderProgramID);
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
-	glUseProgram(shaderProgramID);
-}
-void make_vertexShaders()
-{
-	vertexSource = filetobuf("vertex.glsl");
-	vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vertexShader, 1, (const GLchar**)&vertexSource, 0);
-	glCompileShader(vertexShader);
-	GLint result;
-	GLchar errorLog[512];
-	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &result);
-	if (!result) {
-		glGetShaderInfoLog(vertexShader, sizeof(errorLog), NULL, errorLog);
-		std::cerr << "Vertex shader compilation failed:\n" << errorLog << std::endl;
-	}
-}
-void make_fragmentShaders()
-{
-	fragmentSource = filetobuf("fragment.glsl");
-	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fragmentShader, 1, (const GLchar**)&fragmentSource, 0);
-	glCompileShader(fragmentShader);
-	GLint result;
-	GLchar errorLog[512];
-	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &result);
-}
-char* filetobuf(const char* file)
-{
-	FILE* fptr;
-	long length;
-	char* buf;
-	fptr = fopen(file, "rb"); // Open file for reading
-	if (!fptr) // Return NULL on failure
-		return NULL;
-	fseek(fptr, 0, SEEK_END); // Seek to the end of the file
-	length = ftell(fptr); // Find out how many bytes into the file we are
-	buf = (char*)malloc(length + 1); // Allocate a buffer for the entire length of the file and a null terminator
-	fseek(fptr, 0, SEEK_SET); // Go back to the beginning of the file
-	fread(buf, length, 1, fptr); // Read the contents of the file in to the buffer
-	fclose(fptr); // Close the file
-	buf[length] = 0; // Null terminator
-	return buf; // Return the buffer
-}
 
 void Timer(int value)
 {
@@ -192,8 +141,72 @@ void Timer(int value)
 GLvoid Keyboard(unsigned char key, int x, int y)
 {
 	switch (key) {
-	
+		
 	}
 	glutPostRedisplay(); // 화면 재 출력
 }
 
+
+
+void GetMouseDir() {
+
+}
+
+
+
+void processMouse(int button, int state, int x, int y) {
+	if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+		mx = x, my = y;
+
+		glm::vec3 rayStart = cameraPos;
+
+		int viewport[4];
+		glGetIntegerv(GL_VIEWPORT, viewport);
+
+		glm::vec3 windowPos = glm::vec3(mx, viewport[3] - my, 0.0);
+		glm::vec3 rayDir = glm::unProject(windowPos, view, projection, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+
+		glm::vec3 pickRay = glm::normalize(rayDir - rayStart);
+
+		if (SphereRayIntersection(glm::vec3(2.0f, 0.0f, 0.0f), 1.f, rayStart, pickRay)) {
+			std::cout << "구와 교차함" << std::endl;
+			selected = true;
+		}
+	}
+	if (button == GLUT_LEFT_BUTTON && state == GLUT_UP) {
+		selected = false;
+	}
+}
+void processDragMouse(int x, int y) {
+	if (selected) {
+		// 현재 마우스 위치를 새로운 오브젝트 위치로 설정
+		// 윈도우 좌표를 OpenGL 좌표로 변환
+		int viewport[4];
+		glGetIntegerv(GL_VIEWPORT, viewport);
+
+		glm::vec3 windowPos = glm::vec3(x, viewport[3] - y, 0.0);
+		glm::vec3 newObjectPos = glm::unProject(windowPos, view, projection, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+
+		// 선택된 오브젝트의 위치를 새로운 마우스 위치로 업데이트
+		objPos = newObjectPos;
+		objPos.z = 0.0;
+	}
+}
+
+bool SphereRayIntersection(const glm::vec3& sphereCenter, float sphereRadius, const glm::vec3& rayStart, const glm::vec3& rayDirection) {
+	glm::vec3 rayToSphere = sphereCenter - rayStart;
+	float t = glm::dot(rayToSphere, rayDirection);
+	glm::vec3 closestPoint;
+
+	if (t < 0.0f) {
+		closestPoint = rayStart;
+	}
+	else {
+		closestPoint = rayStart + t * rayDirection;
+	}
+
+	glm::vec3 sphereToClosest = closestPoint - sphereCenter;
+	float distanceSquared = glm::dot(sphereToClosest, sphereToClosest);
+
+	return distanceSquared <= (sphereRadius * sphereRadius);
+}
